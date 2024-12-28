@@ -199,6 +199,7 @@ class ClickableLabel(QLabel):
         self.original_pixmap = None  # Store original pixmap for resetting
         self.original_size = None  # Store original image size
         self.setAlignment(Qt.AlignCenter)
+        self.drag_start = None
 
     def set_image(self, pixmap, original_size):
         self.original_pixmap = pixmap
@@ -212,13 +213,23 @@ class ClickableLabel(QLabel):
         self.scale_factor = (1.0, 1.0)
 
         # Scale and display the image
-        self._update_scaled_image()
+        self._update_scaled_image(center_on_frame=True)
 
-    def _update_scaled_image(self):
+
+    def _update_scaled_image(self, center_on_frame=False):
         if not self.original_pixmap:
             return
 
-        # Scale the image based on the current scale
+        # Calculate the center of the frame in original image coordinates
+        if self.scale_factor is not None and not center_on_frame:
+            current_center_x = (self.width() / 2 - self.image_offset.x()) * self.scale_factor[0]
+            current_center_y = (self.height() / 2 - self.image_offset.y()) * self.scale_factor[1]
+        else:
+            # Default to the center of the image for initial upload
+            current_center_x = self.original_size.width() / 2
+            current_center_y = self.original_size.height() / 2
+
+        # Scale the image based on the current zoom level
         scaled_pixmap = self.original_pixmap.scaled(
             self.original_size.width() * self.current_scale,
             self.original_size.height() * self.current_scale,
@@ -233,12 +244,25 @@ class ClickableLabel(QLabel):
             self.original_size.height() / scaled_pixmap.height(),
         )
 
-        # Center the image in the label
-        self.image_offset = QPoint(
-            (self.width() - scaled_pixmap.width()) // 2,
-            (self.height() - scaled_pixmap.height()) // 2,
-        )
+        # Adjust the image offset
+        if center_on_frame:
+            # Center the image for initial upload
+            self.image_offset = QPoint(
+                (self.width() - scaled_pixmap.width()) // 2,
+                (self.height() - scaled_pixmap.height()) // 2,
+            )
+        else:
+            # Maintain the current position during zoom
+            new_center_x = current_center_x / self.scale_factor[0]
+            new_center_y = current_center_y / self.scale_factor[1]
+            self.image_offset = QPoint(
+                self.width() // 2 - new_center_x,
+                self.height() // 2 - new_center_y,
+            )
+
         self.update()
+
+
 
     def wheelEvent(self, event):
         if not self.original_pixmap:
@@ -272,19 +296,52 @@ class ClickableLabel(QLabel):
             return
 
         # Adjust click position relative to the image position
-        click_pos = event.pos()
-        relative_pos = QPoint(click_pos.x() - self.image_offset.x(), click_pos.y() - self.image_offset.y())
+        if event.button() == Qt.LeftButton:
+            click_pos = event.pos()
+            relative_pos = QPoint(click_pos.x() - self.image_offset.x(), click_pos.y() - self.image_offset.y())
 
-        # Check if the click is within the image boundaries
-        if (0 <= relative_pos.x() < self.pixmap().width()) and (0 <= relative_pos.y() < self.pixmap().height()):
-            # Convert to original image coordinates and store
-            self.crosshair_pos = QPoint(
-                int(relative_pos.x() * self.scale_factor[0]),
-                int(relative_pos.y() * self.scale_factor[1])
-            )
-            self.clicked.emit(self.crosshair_pos)
+            # Check if the click is within the image boundaries
+            if (0 <= relative_pos.x() < self.pixmap().width()) and (0 <= relative_pos.y() < self.pixmap().height()):
+                # Convert to original image coordinates and store
+                self.crosshair_pos = QPoint(
+                    int(relative_pos.x() * self.scale_factor[0]),
+                    int(relative_pos.y() * self.scale_factor[1])
+                )
+                self.clicked.emit(self.crosshair_pos)
+                self.update()
+        elif event.button() == Qt.RightButton:
+            self.drag_start = event.pos()
+
+
+    def mouseMoveEvent(self, event):
+        if not self.original_pixmap:  # Ensure actions only occur when an image is uploaded
+            return
+
+        if self.drag_start is not None:  # Dragging in progress
+            delta = event.pos() - self.drag_start
+            self.drag_start = event.pos()
+
+            # Calculate the current image size
+            scaled_width = self.original_size.width() * self.current_scale
+            scaled_height = self.original_size.height() * self.current_scale
+
+            # Calculate allowable offsets
+            min_offset_x = self.width() // 2 - scaled_width
+            max_offset_x = self.width() // 2
+            min_offset_y = self.height() // 2 - scaled_height
+            max_offset_y = self.height() // 2
+
+            # Update image offset and clamp within bounds
+            new_offset_x = max(min_offset_x, min(max_offset_x, self.image_offset.x() + delta.x()))
+            new_offset_y = max(min_offset_y, min(max_offset_y, self.image_offset.y() + delta.y()))
+            self.image_offset = QPoint(new_offset_x, new_offset_y)
             self.update()
 
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.RightButton:
+            # Stop dragging with right mouse button
+            self.drag_start = None
 
 
     def set_marker(self, key, pos):
@@ -304,11 +361,13 @@ class ClickableLabel(QLabel):
 
 
     def paintEvent(self, event):
-        super().paintEvent(event)
-        if not self.pixmap():
-            return
-
+        # Avoid default rendering that causes multiple images
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw the pixmap with the current offset
+        if self.pixmap():
+            painter.drawPixmap(self.image_offset, self.pixmap())
 
         # Draw crosshair lines if a position is selected
         if self.crosshair_pos:
@@ -333,6 +392,11 @@ class ClickableLabel(QLabel):
                 pen.setWidth(3)
                 painter.setPen(pen)
                 painter.drawEllipse(QPoint(scaled_x, scaled_y), 5, 5)
+
+        # Draw a border around the panel
+        pen = QPen(Qt.black, 1)
+        painter.setPen(pen)
+        painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
 
 
 
