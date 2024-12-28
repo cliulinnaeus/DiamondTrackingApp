@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, QComboBox)
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QCursor
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal
 
 class ImageTrackingApp(QMainWindow):
@@ -146,10 +146,8 @@ class ImageTrackingApp(QMainWindow):
             label = self.right_image_label
             coord_label = self.right_coord_label
 
-        if label.scale_factor:
-            original_x = int(pos.x() * label.scale_factor[0])
-            original_y = int(pos.y() * label.scale_factor[1])
-            coord_label.setText(f"Coordinates: Row: {original_y}, Column: {original_x}")
+        if pos:
+            coord_label.setText(f"Coordinates: Row: {pos.y()}, Column: {pos.x()}")
         else:
             coord_label.setText("Coordinates: None")
 
@@ -166,8 +164,8 @@ class ImageTrackingApp(QMainWindow):
         if not label.crosshair_pos:
             return
 
-        original_x = int(label.crosshair_pos.x() * label.scale_factor[0])
-        original_y = int(label.crosshair_pos.y() * label.scale_factor[1])
+        original_x = int(label.crosshair_pos.x())
+        original_y = int(label.crosshair_pos.y())
         key = dropdown.currentText()
         label.set_marker(key, (original_x, original_y))
         self.update_points_display(points_label, label)
@@ -179,7 +177,10 @@ class ImageTrackingApp(QMainWindow):
         for key in ['origin', 'axis 1', 'axis 2']:
             color = colors[key]
             pos = label.get_marker_coordinates().get(key, None)
-            text = f"{key.capitalize()}: {pos if pos else 'None'}"
+            if pos:
+                text = f"{key.capitalize()}: Row: {pos[1]}, Column: {pos[0]}"
+            else:
+                text = f"{key.capitalize()}: None"
             points_text += f'<div style="color: {color};">{text}</div>'
         points_label.setText(points_text)
 
@@ -194,30 +195,77 @@ class ClickableLabel(QLabel):
         self.crosshair_pos = None
         self.scale_factor = None
         self.image_offset = QPoint(0, 0)  # Position of the image within the panel
-        self.setAlignment(Qt.AlignCenter)  # Ensure the image is centered
+        self.current_scale = 1.0  # Current zoom level
+        self.original_pixmap = None  # Store original pixmap for resetting
+        self.original_size = None  # Store original image size
+        self.setAlignment(Qt.AlignCenter)
 
     def set_image(self, pixmap, original_size):
-        # Scale the image to fit the label size while maintaining aspect ratio
-        scaled_pixmap = pixmap.scaled(
-            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        self.original_pixmap = pixmap
+        self.original_size = original_size
+
+        # Reset zoom and scale factors
+        self.current_scale = min(
+            self.width() / original_size.width(),
+            self.height() / original_size.height(),
+        )  # Ensure the image is fully visible by default
+        self.scale_factor = (1.0, 1.0)
+
+        # Scale and display the image
+        self._update_scaled_image()
+
+    def _update_scaled_image(self):
+        if not self.original_pixmap:
+            return
+
+        # Scale the image based on the current scale
+        scaled_pixmap = self.original_pixmap.scaled(
+            self.original_size.width() * self.current_scale,
+            self.original_size.height() * self.current_scale,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
         )
         self.setPixmap(scaled_pixmap)
 
-        # Store the scale factor for coordinate transformations
+        # Update the scale factor
         self.scale_factor = (
-            original_size.width() / scaled_pixmap.width(),
-            original_size.height() / scaled_pixmap.height(),
+            self.original_size.width() / scaled_pixmap.width(),
+            self.original_size.height() / scaled_pixmap.height(),
         )
 
-        # Calculate the position of the image within the label (centered if smaller)
+        # Center the image in the label
         self.image_offset = QPoint(
             (self.width() - scaled_pixmap.width()) // 2,
             (self.height() - scaled_pixmap.height()) // 2,
         )
-
-        self.markers = {'origin': None, 'axis 1': None, 'axis 2': None}
-        self.crosshair_pos = None
         self.update()
+
+    def wheelEvent(self, event):
+        if not self.original_pixmap:
+            return  # Do not allow zoom if no image is uploaded
+
+        # Check if the mouse is within the image boundaries
+        cursor_pos = self.mapFromGlobal(QCursor.pos())
+        if not (self.image_offset.x() <= cursor_pos.x() < self.image_offset.x() + self.pixmap().width() and
+                self.image_offset.y() <= cursor_pos.y() < self.image_offset.y() + self.pixmap().height()):
+            return  # Do not zoom if the cursor is outside the image
+
+        # Zoom in or out based on the scroll direction
+        zoom_factor = 0.2  # Faster zoom
+        if event.angleDelta().y() > 0:  # Scroll up (zoom in)
+            self.current_scale += zoom_factor
+        elif self.current_scale > min(
+            self.width() / self.original_size.width(),
+            self.height() / self.original_size.height(),
+        ):  # Scroll down (zoom out)
+            self.current_scale = max(
+                min(self.width() / self.original_size.width(),
+                    self.height() / self.original_size.height()),
+                self.current_scale - zoom_factor,
+            )
+
+        # Update the scaled image
+        self._update_scaled_image()
 
     def mousePressEvent(self, event):
         if not self.pixmap():
@@ -229,9 +277,15 @@ class ClickableLabel(QLabel):
 
         # Check if the click is within the image boundaries
         if (0 <= relative_pos.x() < self.pixmap().width()) and (0 <= relative_pos.y() < self.pixmap().height()):
-            self.crosshair_pos = QPoint(relative_pos.x(), relative_pos.y())
+            # Convert to original image coordinates and store
+            self.crosshair_pos = QPoint(
+                int(relative_pos.x() * self.scale_factor[0]),
+                int(relative_pos.y() * self.scale_factor[1])
+            )
             self.clicked.emit(self.crosshair_pos)
             self.update()
+
+
 
     def set_marker(self, key, pos):
         # Store marker in original image coordinates
@@ -248,6 +302,7 @@ class ClickableLabel(QLabel):
         # Return original coordinates of markers
         return {key: value if value else None for key, value in self.markers.items()}
 
+
     def paintEvent(self, event):
         super().paintEvent(event)
         if not self.pixmap():
@@ -259,14 +314,13 @@ class ClickableLabel(QLabel):
         if self.crosshair_pos:
             pen = QPen(Qt.red, 1)
             painter.setPen(pen)
-            painter.drawLine(
-                0, self.crosshair_pos.y() + self.image_offset.y(),
-                self.width(), self.crosshair_pos.y() + self.image_offset.y()
-            )
-            painter.drawLine(
-                self.crosshair_pos.x() + self.image_offset.x(), 0,
-                self.crosshair_pos.x() + self.image_offset.x(), self.height()
-            )
+
+            # Convert original coordinates to scaled coordinates for drawing
+            scaled_cross_x = int(self.crosshair_pos.x() / self.scale_factor[0]) + self.image_offset.x()
+            scaled_cross_y = int(self.crosshair_pos.y() / self.scale_factor[1]) + self.image_offset.y()
+
+            painter.drawLine(0, scaled_cross_y, self.width(), scaled_cross_y)  # Horizontal
+            painter.drawLine(scaled_cross_x, 0, scaled_cross_x, self.height())  # Vertical
 
         # Draw markers for origin, axis 1, and axis 2
         colors = {'origin': Qt.red, 'axis 1': Qt.green, 'axis 2': Qt.magenta}
@@ -279,6 +333,7 @@ class ClickableLabel(QLabel):
                 pen.setWidth(3)
                 painter.setPen(pen)
                 painter.drawEllipse(QPoint(scaled_x, scaled_y), 5, 5)
+
 
 
 def main():
