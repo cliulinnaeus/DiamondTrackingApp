@@ -1,25 +1,30 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QFileDialog, QComboBox)
+                             QHBoxLayout, QPushButton, QLabel, QFileDialog, QComboBox, QMessageBox)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QCursor
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal
+import numpy as np
+import cv2
+
 
 class ImageTrackingApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.initUI()
+        self.motor_axis_1 = None
+        self.motor_axis_2 = None
 
     def initUI(self):
         # Set window title
         self.setWindowTitle("Image Tracking with Points")
 
-        # Set window size to 80% of the screen
+        # Set window size to 60% of the screen
         screen_geometry = QApplication.primaryScreen().availableGeometry()
-        window_width = int(screen_geometry.width() * 0.8)
-        window_height = int(screen_geometry.height() * 0.8)
+        window_width = int(screen_geometry.width() * 0.6)
+        window_height = int(screen_geometry.height() * 0.6)
         self.setGeometry(
-            int(screen_geometry.width() * 0.1),
-            int(screen_geometry.height() * 0.1),
+            int(screen_geometry.width() * 0.2),
+            int(screen_geometry.height() * 0.2),
             window_width,
             window_height,
         )
@@ -32,7 +37,7 @@ class ImageTrackingApp(QMainWindow):
         # Add subtitle with bigger font and move it up
         subtitle = QLabel("Define Coordinates and Key Points")
         subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("font-size: 24px; font-weight: bold; margin: 10px;")
+        subtitle.setStyleSheet("font-size: 20px; font-weight: bold; margin: 8px;")
         main_layout.addWidget(subtitle)
 
         # Create horizontal layout for image panels
@@ -41,18 +46,17 @@ class ImageTrackingApp(QMainWindow):
         # Left panel
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 10, 0, 0)  # Move content upward
+        left_layout.setContentsMargins(0, 8, 0, 0)
 
-        # Title for the left panel
-        left_title = QLabel("Reference (Microscope Image)")
+        left_title = QLabel("Reference (Microscope Image) / Original White Light Image")
         left_title.setAlignment(Qt.AlignCenter)
-        left_title.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 10px;")
+        left_title.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 6px;")
         left_layout.addWidget(left_title)
 
-        # Left image label and controls
+        # Reduce the size of the left image label
         self.left_image_label = ClickableLabel()
         self.left_image_label.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc;")
-        self.left_image_label.setFixedSize(800, 600)
+        self.left_image_label.setFixedSize(600, 400)
         self.left_image_label.clicked.connect(lambda pos: self.show_coordinates(pos, "left"))
         left_layout.addWidget(self.left_image_label)
 
@@ -79,18 +83,17 @@ class ImageTrackingApp(QMainWindow):
         # Right panel
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 10, 0, 0)  # Move content upward
+        right_layout.setContentsMargins(0, 8, 0, 0)
 
-        # Title for the right panel
-        right_title = QLabel("Feature (White Light Image)")
+        right_title = QLabel("Feature (White Light Image) / Displaced White Light Image")
         right_title.setAlignment(Qt.AlignCenter)
-        right_title.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 10px;")
+        right_title.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 6px;")
         right_layout.addWidget(right_title)
 
-        # Right image label and controls
+        # Reduce the size of the right image label
         self.right_image_label = ClickableLabel()
         self.right_image_label.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc;")
-        self.right_image_label.setFixedSize(800, 600)
+        self.right_image_label.setFixedSize(600, 400)
         self.right_image_label.clicked.connect(lambda pos: self.show_coordinates(pos, "right"))
         right_layout.addWidget(self.right_image_label)
 
@@ -120,6 +123,40 @@ class ImageTrackingApp(QMainWindow):
 
         # Add image layout to main layout
         main_layout.addLayout(image_layout)
+
+        # Add Solve Transformation and Solve Displacement buttons at the bottom
+        # self.solve_transformation_button = QPushButton("Solve Transformation")
+        # self.solve_displacement_button = QPushButton("Solve Displacement")
+        # main_layout.addWidget(self.solve_transformation_button)
+        # main_layout.addWidget(self.solve_displacement_button)
+
+        # Connect button actions
+        # self.solve_transformation_button.clicked.connect(self.handle_solve_transformation)
+        # self.solve_displacement_button.clicked.connect(self.handle_solve_displacement)
+
+        # Add dropdown menu and save buttons for displacement vectors
+        displacement_controls = QHBoxLayout()
+
+        # Dropdown menu for selecting motor axis
+        self.displacement_dropdown = QComboBox()
+        self.displacement_dropdown.addItems(["motor_axis_1", "motor_axis_2"])
+        displacement_controls.addWidget(self.displacement_dropdown)
+
+        # Save displacement button
+        save_displacement_button = QPushButton("Save Displacement")
+        save_displacement_button.clicked.connect(self.save_displacement)
+        displacement_controls.addWidget(save_displacement_button)
+
+        # Add to main layout
+        main_layout.addLayout(displacement_controls)
+        # Display motor axis 1 and motor axis 2 values
+        self.motor_axis_1_label = QLabel("Motor Axis 1: None")
+        self.motor_axis_2_label = QLabel("Motor Axis 2: None")
+        main_layout.addWidget(self.motor_axis_1_label)
+        main_layout.addWidget(self.motor_axis_2_label)
+
+
+
 
     def upload_image(self, panel):
         file_name, _ = QFileDialog.getOpenFileName(
@@ -183,6 +220,104 @@ class ImageTrackingApp(QMainWindow):
                 text = f"{key.capitalize()}: None"
             points_text += f'<div style="color: {color};">{text}</div>'
         points_label.setText(points_text)
+
+    def handle_solve_transformation(self):
+        """
+        Handles solving the transformation matrix between the points.
+        """
+        # Retrieve points from the left and right panels
+        left_markers = self.left_image_label.get_marker_coordinates()
+        right_markers = self.right_image_label.get_marker_coordinates()
+
+        # Check if all required points are set
+        for label, markers in [("Left", left_markers), ("Right", right_markers)]:
+            if not (markers.get("origin") and markers.get("axis 1") and markers.get("axis 2")):
+                self.show_message(f"{label} panel is missing points. Set origin, axis 1, and axis 2.")
+                return
+        # saved as (column, row)    
+        # print(left_markers["axis 1"])
+        # Extract corresponding points
+        u1 = np.array(left_markers["axis 1"]) - np.array(left_markers["origin"])
+        u2 = np.array(left_markers["axis 2"]) - np.array(left_markers["origin"])
+
+        v1 = np.array(right_markers["axis 1"]) - np.array(right_markers["origin"])
+        v2 = np.array(right_markers["axis 2"]) - np.array(right_markers["origin"])
+
+        try:
+            # Solve transformation
+            transformation_matrix = solve_transformation(u1, u2, v1, v2)
+            self.show_message(f"Transformation Matrix:\n{transformation_matrix}")
+        except Exception as e:
+            self.show_message(f"Error solving transformation: {e}")
+
+    def handle_solve_displacement(self):
+        """
+        Handles solving the average displacement vector between points.
+        """
+        # Retrieve points from the left and right panels
+        left_markers = self.left_image_label.get_marker_coordinates()
+        right_markers = self.right_image_label.get_marker_coordinates()
+
+        # Check if all required points are set
+        for label, markers in [("Left", left_markers), ("Right", right_markers)]:
+            if not (markers.get("origin") and markers.get("axis 1") and markers.get("axis 2")):
+                self.show_message(f"{label} panel is missing points. Set origin, axis 1, and axis 2.")
+                return
+
+        # Extract corresponding points
+        p1, p2, p3 = left_markers["origin"], left_markers["axis 1"], left_markers["axis 2"]
+        p4, p5, p6 = right_markers["origin"], right_markers["axis 1"], right_markers["axis 2"]
+
+        try:
+            # Solve displacement
+            displacement_vector = solve_displacement(p1, p2, p3, p4, p5, p6)
+            self.show_message(f"Displacement Vector:\n{displacement_vector}")
+        except Exception as e:
+            self.show_message(f"Error solving displacement: {e}")
+
+    def show_message(self, message):
+        """
+        Display a message in a dialog box.
+        """
+        msg_box = QMessageBox(self)
+        msg_box.setText(message)
+        msg_box.exec_()
+
+
+    def save_displacement(self):
+        """
+        Save the displacement vector calculated by `solve_displacement`
+        to the selected motor axis variable and update the display.
+        """
+        # Retrieve selected motor axis
+        motor_axis = self.displacement_dropdown.currentText()
+
+        # Check if displacement is calculated
+        try:
+            # Retrieve points from the left and right panels
+            left_markers = self.left_image_label.get_marker_coordinates()
+            right_markers = self.right_image_label.get_marker_coordinates()
+
+            # Extract corresponding points
+            p1, p2, p3 = left_markers["origin"], left_markers["axis 1"], left_markers["axis 2"]
+            p4, p5, p6 = right_markers["origin"], right_markers["axis 1"], right_markers["axis 2"]
+
+            # Calculate displacement
+            displacement_vector = solve_displacement(p1, p2, p3, p4, p5, p6)
+
+            # Save the result
+            if motor_axis == "motor_axis_1":
+                self.motor_axis_1 = displacement_vector
+                self.motor_axis_1_label.setText(f"Motor Axis 1: {displacement_vector}")
+            elif motor_axis == "motor_axis_2":
+                self.motor_axis_2 = displacement_vector
+                self.motor_axis_2_label.setText(f"Motor Axis 2: {displacement_vector}")
+
+            self.show_message(f"Displacement saved to {motor_axis}: {displacement_vector}")
+        except Exception as e:
+            self.show_message(f"Error saving displacement: {e}")
+
+
 
 
 
@@ -397,6 +532,38 @@ class ClickableLabel(QLabel):
         pen = QPen(Qt.black, 1)
         painter.setPen(pen)
         painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
+
+
+
+# M @ u1 = v1; M @ u2 = v2, solve for M
+# transformation that maps a coord in ref to feature
+def solve_transformation(u1, u2, v1, v2):
+    U = np.column_stack((u1, u2))
+    V = np.column_stack((v1, v2))
+    # M U = V so M = V @ U^{-1}
+    M = V @ np.linalg.inv(U)
+    return M
+
+# compute average of p4 - p1, p5 - p2, p6 - p4
+def solve_displacement(p1, p2, p3, p4, p5, p6):
+    v1 = np.array(p4) - np.array(p1)
+    v2 = np.array(p5) - np.array(p2)
+    v3 = np.array(p6) - np.array(p3)
+    return np.round((v1 + v2 + v3) / 3).astype(int)
+
+# v is a vector on the zoomed out image
+# def solve_motor_conversion(v):
+#     M = result of solve_transformation
+#     displacement_motor_axis1 = saved result of solve_displacement
+#     displacement_motor_axis2 = saved result of solve_displacement
+#     u = M @ v
+#     B = np.column_stack((displacement_motor_axis1, displacement_motor_axis2))
+#     B_inv = np.linalg.inv(B)
+#     c = B_inv @ u    # c0 is how many times to move x um in axis 1, c1 is for axis 2
+
+#     return c0 * x, c1 * y
+
+
 
 
 
