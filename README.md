@@ -10,7 +10,7 @@ An application for interactive image tracking and motor axis displacement solvin
 
 ## Installation
 ### Prerequisites
-- Python 3.8+
+- Python 3.5 - 3.9
 - Pip
 
 ### Steps
