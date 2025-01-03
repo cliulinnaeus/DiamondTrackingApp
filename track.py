@@ -1,7 +1,8 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QFileDialog, QComboBox, QMessageBox)
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QCursor
+                             QHBoxLayout, QPushButton, QLabel, QFileDialog, QComboBox, 
+                             QMessageBox, QLineEdit)
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QCursor, QDoubleValidator
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal
 import numpy as np
 import cv2
@@ -134,7 +135,7 @@ class ImageTrackingApp(QMainWindow):
         # self.solve_transformation_button.clicked.connect(self.handle_solve_transformation)
         # self.solve_displacement_button.clicked.connect(self.handle_solve_displacement)
 
-        # Add dropdown menu and save buttons for displacement vectors
+        # Add controls for motor displacement
         displacement_controls = QHBoxLayout()
 
         # Dropdown menu for selecting motor axis
@@ -142,19 +143,34 @@ class ImageTrackingApp(QMainWindow):
         self.displacement_dropdown.addItems(["motor_axis_1", "motor_axis_2"])
         displacement_controls.addWidget(self.displacement_dropdown)
 
+        # Add label "Enter motor displacement"
+        enter_displacement_label = QLabel("Enter motor displacement")
+        displacement_controls.addWidget(enter_displacement_label)
+
+        # Text input for motor displacement
+        self.motor_displacement_input = QLineEdit()
+        self.motor_displacement_input.setPlaceholderText("0000")  # Example placeholder
+        self.motor_displacement_input.setValidator(QDoubleValidator())  # Restrict to floats and ints
+        self.motor_displacement_input.setFixedWidth(60)  # Resize for 4-digit input
+        displacement_controls.addWidget(self.motor_displacement_input)
+
+        # Label for units
+        units_label = QLabel("arbitrary motor units")
+        displacement_controls.addWidget(units_label)
+
         # Save displacement button
-        save_displacement_button = QPushButton("Save Displacement")
+        save_displacement_button = QPushButton("Save Image Displacement and Motor Displacement")
         save_displacement_button.clicked.connect(self.save_displacement)
         displacement_controls.addWidget(save_displacement_button)
 
         # Add to main layout
         main_layout.addLayout(displacement_controls)
+
         # Display motor axis 1 and motor axis 2 values
-        self.motor_axis_1_label = QLabel("Motor Axis 1: None")
-        self.motor_axis_2_label = QLabel("Motor Axis 2: None")
+        self.motor_axis_1_label = QLabel("<b>Motor Axis 1:</b> Image Displacement (pixels): [None, None]; Motor Displacement (a.u.): None")
+        self.motor_axis_2_label = QLabel("<b>Motor Axis 2:</b> Image Displacement (pixels): [None, None]; Motor Displacement (a.u.): None")
         main_layout.addWidget(self.motor_axis_1_label)
         main_layout.addWidget(self.motor_axis_2_label)
-
 
 
 
@@ -286,8 +302,8 @@ class ImageTrackingApp(QMainWindow):
 
     def save_displacement(self):
         """
-        Save the displacement vector calculated by `solve_displacement`
-        to the selected motor axis variable and update the display.
+        Save the displacement vector and motor displacement value
+        for the selected motor axis.
         """
         # Retrieve selected motor axis
         motor_axis = self.displacement_dropdown.currentText()
@@ -302,22 +318,34 @@ class ImageTrackingApp(QMainWindow):
             p1, p2, p3 = left_markers["origin"], left_markers["axis 1"], left_markers["axis 2"]
             p4, p5, p6 = right_markers["origin"], right_markers["axis 1"], right_markers["axis 2"]
 
-            # Calculate displacement
+            # Calculate displacement vector
             displacement_vector = solve_displacement(p1, p2, p3, p4, p5, p6)
+
+            # Retrieve motor displacement value
+            motor_displacement_value = self.motor_displacement_input.text()
+            if not motor_displacement_value:
+                self.show_message("Please enter a motor displacement value.")
+                return
+
+            motor_displacement_value = float(motor_displacement_value)
 
             # Save the result
             if motor_axis == "motor_axis_1":
-                self.motor_axis_1 = displacement_vector
-                self.motor_axis_1_label.setText(f"Motor Axis 1: {displacement_vector}")
+                self.motor_axis_1 = (displacement_vector, motor_displacement_value)
+                self.motor_axis_1_label.setText(
+                    f"<b>Motor Axis 1:</b> Image Displacement (pixels): [{displacement_vector[0]:.2f}, {displacement_vector[1]:.2f}]; "
+                    f"Motor Displacement (a.u.): {motor_displacement_value:.2f}"
+                )
             elif motor_axis == "motor_axis_2":
-                self.motor_axis_2 = displacement_vector
-                self.motor_axis_2_label.setText(f"Motor Axis 2: {displacement_vector}")
+                self.motor_axis_2 = (displacement_vector, motor_displacement_value)
+                self.motor_axis_2_label.setText(
+                    f"<b>Motor Axis 2:</b> Image Displacement (pixels): [{displacement_vector[0]:.2f}, {displacement_vector[1]:.2f}]; "
+                    f"Motor Displacement (a.u.): {motor_displacement_value:.2f}"
+                )
 
-            self.show_message(f"Displacement saved to {motor_axis}: {displacement_vector}")
+            self.show_message(f"Displacement and motor value saved to {motor_axis}: {displacement_vector}, {motor_displacement_value} units")
         except Exception as e:
             self.show_message(f"Error saving displacement: {e}")
-
-
 
 
 
