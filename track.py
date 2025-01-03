@@ -14,6 +14,8 @@ class ImageTrackingApp(QMainWindow):
         self.initUI()
         self.motor_axis_1 = None
         self.motor_axis_2 = None
+        self.transformation_matrix = None
+        self.origin = None
 
     def initUI(self):
         # Set window title
@@ -125,6 +127,12 @@ class ImageTrackingApp(QMainWindow):
         # Add image layout to main layout
         main_layout.addLayout(image_layout)
 
+
+        # Save Transformation Matrix button
+        self.save_matrix_button = QPushButton("Save Origin and Transformation Matrix")
+        self.save_matrix_button.clicked.connect(self.handle_solve_transformation)
+        main_layout.addWidget(self.save_matrix_button)
+
         # Add Solve Transformation and Solve Displacement buttons at the bottom
         # self.solve_transformation_button = QPushButton("Solve Transformation")
         # self.solve_displacement_button = QPushButton("Solve Displacement")
@@ -171,6 +179,19 @@ class ImageTrackingApp(QMainWindow):
         self.motor_axis_2_label = QLabel("<b>Motor Axis 2:</b> Image Displacement (pixels): [None, None]; Motor Displacement (a.u.): None")
         main_layout.addWidget(self.motor_axis_1_label)
         main_layout.addWidget(self.motor_axis_2_label)
+
+        # Add "Launch Interactive Map" button
+        launch_map_button = QPushButton("Launch Interactive Map")
+        launch_map_button.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
+        launch_map_button.clicked.connect(self.launch_interactive_map)
+
+        # Center-align the button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)  # Add stretchable space on the left
+        button_layout.addWidget(launch_map_button)
+        button_layout.addStretch(1)  # Add stretchable space on the right
+
+        main_layout.addLayout(button_layout)
 
 
 
@@ -260,9 +281,11 @@ class ImageTrackingApp(QMainWindow):
         v2 = np.array(right_markers["axis 2"]) - np.array(right_markers["origin"])
 
         try:
+            # saves origin
+            self.origin = np.array(left_markers["origin"])
             # Solve transformation
-            transformation_matrix = solve_transformation(u1, u2, v1, v2)
-            self.show_message(f"Transformation Matrix:\n{transformation_matrix}")
+            self.transformation_matrix = solve_transformation(u1, u2, v1, v2)
+            self.show_message(f"Transformation Matrix:\n{self.transformation_matrix}")
         except Exception as e:
             self.show_message(f"Error solving transformation: {e}")
 
@@ -286,7 +309,7 @@ class ImageTrackingApp(QMainWindow):
 
         try:
             # Solve displacement
-            displacement_vector = solve_displacement(p1, p2, p3, p4, p5, p6)
+            displacement_vector = solve_image_displacement(p1, p2, p3, p4, p5, p6)
             self.show_message(f"Displacement Vector:\n{displacement_vector}")
         except Exception as e:
             self.show_message(f"Error solving displacement: {e}")
@@ -319,7 +342,7 @@ class ImageTrackingApp(QMainWindow):
             p4, p5, p6 = right_markers["origin"], right_markers["axis 1"], right_markers["axis 2"]
 
             # Calculate displacement vector
-            displacement_vector = solve_displacement(p1, p2, p3, p4, p5, p6)
+            displacement_vector = solve_image_displacement(p1, p2, p3, p4, p5, p6)
 
             # Retrieve motor displacement value
             motor_displacement_value = self.motor_displacement_input.text()
@@ -346,6 +369,16 @@ class ImageTrackingApp(QMainWindow):
             self.show_message(f"Displacement and motor value saved to {motor_axis}: {displacement_vector}, {motor_displacement_value} units")
         except Exception as e:
             self.show_message(f"Error saving displacement: {e}")
+
+
+    def launch_interactive_map(self):
+        """
+        Launch the interactive map window.
+        """
+        if self.transformation_matrix.all() != None and self.motor_axis_1 != None and self.motor_axis_2 != None:
+            self.interactive_map_window = InteractiveMapWindow(self.origin, self.transformation_matrix, 
+                                                            self.motor_axis_1, self.motor_axis_2)
+            self.interactive_map_window.show()
 
 
 
@@ -462,7 +495,6 @@ class ClickableLabel(QLabel):
         if event.button() == Qt.LeftButton:
             click_pos = event.pos()
             relative_pos = QPoint(click_pos.x() - self.image_offset.x(), click_pos.y() - self.image_offset.y())
-
             # Check if the click is within the image boundaries
             if (0 <= relative_pos.x() < self.pixmap().width()) and (0 <= relative_pos.y() < self.pixmap().height()):
                 # Convert to original image coordinates and store
@@ -562,6 +594,107 @@ class ClickableLabel(QLabel):
         painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
 
 
+class InteractiveMapWindow(QMainWindow):
+    def __init__(self, origin, transformation_matrix, motor_axis_1, motor_axis_2):
+        super().__init__()
+        self.initUI()
+        self.origin = origin
+        self.transformation_matrix = transformation_matrix
+        self.motor_axis_1 = motor_axis_1
+        self.motor_axis_2 = motor_axis_2
+
+    def initUI(self):
+        self.setWindowTitle("Interactive Map")
+
+        # Set size to match the original window
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        window_width = int(screen_geometry.width() * 0.8)
+        window_height = int(screen_geometry.height() * 0.8)
+        self.setGeometry(
+            int(screen_geometry.width() * 0.1),
+            int(screen_geometry.height() * 0.1),
+            window_width,
+            window_height,
+        )
+
+        # Central widget and layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+
+        # Image panel (ClickableLabel)
+        self.image_label = ClickableLabel()
+        self.image_label.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc;")
+        self.image_label.setFixedSize(window_width * 0.8, window_height * 0.9)
+        self.image_label.clicked.connect(self.update_coordinate_display)
+        main_layout.addWidget(self.image_label)
+
+        # Right panel with upload button and coordinate display
+        right_panel = QVBoxLayout()
+
+        # Upload button
+        upload_button = QPushButton("Upload Image")
+        upload_button.clicked.connect(self.upload_image)
+        right_panel.addWidget(upload_button)
+
+        # Coordinate display
+        self.coordinate_display = QLabel("Coordinates: None")
+        self.coordinate_display.setAlignment(Qt.AlignLeft)
+        right_panel.addWidget(self.coordinate_display)
+
+        # Motor Axis 1 and 2 displays
+        self.motor_axis_1_display = QLabel("Motor Axis 1: None")
+        self.motor_axis_1_display.setAlignment(Qt.AlignLeft)
+        self.motor_axis_1_display.setStyleSheet("font-size: 16px; font-weight: bold;")
+        right_panel.addWidget(self.motor_axis_1_display)
+
+        self.motor_axis_2_display = QLabel("Motor Axis 2: None")
+        self.motor_axis_2_display.setAlignment(Qt.AlignLeft)
+        self.motor_axis_2_display.setStyleSheet("font-size: 16px; font-weight: bold;")
+        right_panel.addWidget(self.motor_axis_2_display)
+
+
+        # Add right panel to main layout
+        main_layout.addLayout(right_panel)
+
+    def upload_image(self):
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(self, "Upload Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)", options=options)
+        if file_path:
+            pixmap = QPixmap(file_path)
+            image = QImage(file_path)
+            self.image_label.set_image(pixmap, image.size())  # Use set_image to initialize scale_factor
+
+    def update_coordinate_display(self):
+        if self.image_label.crosshair_pos:
+            x, y = self.image_label.crosshair_pos.x(), self.image_label.crosshair_pos.y()
+            self.coordinate_display.setText(f"Coordinates: Row {int(y)}, Column {int(x)}")
+            motor_axis_1, motor_axis_2 = self.solve_motor_values()
+            self.motor_axis_1_display.setText(f"Motor Axis 1: {motor_axis_1:.2f}")
+            self.motor_axis_2_display.setText(f"Motor Axis 2: {motor_axis_2:.2f}")
+
+        else:
+            self.coordinate_display.setText("Coordinates: None")
+            self.motor_axis_1_display.setText("Motor Axis 1: None")
+            self.motor_axis_2_display.setText("Motor Axis 2: None")
+
+    def solve_motor_values(self):
+        x, y = self.image_label.crosshair_pos.x(), self.image_label.crosshair_pos.y()
+        v = np.array([x, y]) - self.origin   # image vector
+
+        motor_axis_1_displacement = self.motor_axis_1[1]
+        motor_axis_2_displacement = self.motor_axis_2[1]
+        image_axis_1_displacement = self.motor_axis_1[0]
+        image_axis_2_displacement = self.motor_axis_2[0]        
+
+        u = self.transformation_matrix @ v    # feature map vector
+        B = np.column_stack((image_axis_1_displacement, image_axis_2_displacement))
+        B_inv = np.linalg.inv(B)
+        c = B_inv @ u
+        motor_axis_1_value = c[0] * motor_axis_1_displacement
+        motor_axis_2_value = c[1] * motor_axis_2_displacement
+        return motor_axis_1_value, motor_axis_2_value
+
 
 # M @ u1 = v1; M @ u2 = v2, solve for M
 # transformation that maps a coord in ref to feature
@@ -573,11 +706,13 @@ def solve_transformation(u1, u2, v1, v2):
     return M
 
 # compute average of p4 - p1, p5 - p2, p6 - p4
-def solve_displacement(p1, p2, p3, p4, p5, p6):
+def solve_image_displacement(p1, p2, p3, p4, p5, p6):
     v1 = np.array(p4) - np.array(p1)
     v2 = np.array(p5) - np.array(p2)
     v3 = np.array(p6) - np.array(p3)
     return np.round((v1 + v2 + v3) / 3).astype(int)
+
+
 
 # v is a vector on the zoomed out image
 # def solve_motor_conversion(v):
@@ -590,8 +725,6 @@ def solve_displacement(p1, p2, p3, p4, p5, p6):
 #     c = B_inv @ u    # c0 is how many times to move x um in axis 1, c1 is for axis 2
 
 #     return c0 * x, c1 * y
-
-
 
 
 
