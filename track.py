@@ -5,7 +5,6 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QCursor, QDoubleValidator
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal
 import numpy as np
-import cv2
 
 
 class ImageTrackingApp(QMainWindow):
