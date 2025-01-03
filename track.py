@@ -133,16 +133,6 @@ class ImageTrackingApp(QMainWindow):
         self.save_matrix_button.clicked.connect(self.handle_solve_transformation)
         main_layout.addWidget(self.save_matrix_button)
 
-        # Add Solve Transformation and Solve Displacement buttons at the bottom
-        # self.solve_transformation_button = QPushButton("Solve Transformation")
-        # self.solve_displacement_button = QPushButton("Solve Displacement")
-        # main_layout.addWidget(self.solve_transformation_button)
-        # main_layout.addWidget(self.solve_displacement_button)
-
-        # Connect button actions
-        # self.solve_transformation_button.clicked.connect(self.handle_solve_transformation)
-        # self.solve_displacement_button.clicked.connect(self.handle_solve_displacement)
-
         # Add controls for motor displacement
         displacement_controls = QHBoxLayout()
 
@@ -712,19 +702,6 @@ def solve_image_displacement(p1, p2, p3, p4, p5, p6):
     v3 = np.array(p6) - np.array(p3)
     return np.round((v1 + v2 + v3) / 3).astype(int)
 
-
-
-# v is a vector on the zoomed out image
-# def solve_motor_conversion(v):
-#     M = result of solve_transformation
-#     displacement_motor_axis1 = saved result of solve_displacement
-#     displacement_motor_axis2 = saved result of solve_displacement
-#     u = M @ v
-#     B = np.column_stack((displacement_motor_axis1, displacement_motor_axis2))
-#     B_inv = np.linalg.inv(B)
-#     c = B_inv @ u    # c0 is how many times to move x um in axis 1, c1 is for axis 2
-
-#     return c0 * x, c1 * y
 
 
 
