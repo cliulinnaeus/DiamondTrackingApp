@@ -364,7 +364,7 @@ class ImageTrackingApp(QMainWindow):
         """
         Launch the interactive map window.
         """
-        if self.transformation_matrix.all() != None and self.motor_axis_1 != None and self.motor_axis_2 != None:
+        if self.transformation_matrix != None and self.motor_axis_1 != None and self.motor_axis_2 != None:
             self.interactive_map_window = InteractiveMapWindow(self.origin, self.transformation_matrix, 
                                                             self.motor_axis_1, self.motor_axis_2)
             self.interactive_map_window.show()
