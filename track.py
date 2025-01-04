@@ -18,15 +18,15 @@ class ImageTrackingApp(QMainWindow):
 
     def initUI(self):
         # Set window title
-        self.setWindowTitle("Image Tracking with Points")
+        self.setWindowTitle("Diamond Image Tracking")
 
         # Set window size to 60% of the screen
         screen_geometry = QApplication.primaryScreen().availableGeometry()
         window_width = int(screen_geometry.width() * 0.6)
         window_height = int(screen_geometry.height() * 0.6)
         self.setGeometry(
-            int(screen_geometry.width() * 0.2),
-            int(screen_geometry.height() * 0.2),
+            int(screen_geometry.width() * 0.1),
+            int(screen_geometry.height() * 0.1),
             window_width,
             window_height,
         )
@@ -374,8 +374,8 @@ class ImageTrackingApp(QMainWindow):
 class ClickableLabel(QLabel):
     clicked = pyqtSignal(QPoint)
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.markers = {'origin': None, 'axis 1': None, 'axis 2': None}
         self.crosshair_pos = None
         self.scale_factor = None
@@ -385,6 +385,7 @@ class ClickableLabel(QLabel):
         self.original_size = None  # Store original image size
         self.setAlignment(Qt.AlignCenter)
         self.drag_start = None
+        self.parent_window = parent
 
     def set_image(self, pixmap, original_size):
         self.original_pixmap = pixmap
@@ -479,6 +480,13 @@ class ClickableLabel(QLabel):
     def mousePressEvent(self, event):
         if not self.pixmap():
             return
+
+        # Check if this label belongs to the InteractiveMapWindow
+        if isinstance(self.parent_window, InteractiveMapWindow):
+            if not hasattr(self.parent_window, 'origin_axis_1') or not hasattr(self.parent_window, 'origin_axis_2'):
+                self.parent_window.show_message("Motor origins are not set. Please set them before clicking on the image.")
+                return
+
 
         # Adjust click position relative to the image position
         if event.button() == Qt.LeftButton:
@@ -612,7 +620,7 @@ class InteractiveMapWindow(QMainWindow):
         main_layout = QHBoxLayout(central_widget)
 
         # Image panel (ClickableLabel)
-        self.image_label = ClickableLabel()
+        self.image_label = ClickableLabel(self)
         self.image_label.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc;")
         self.image_label.setFixedSize(window_width * 0.8, window_height * 0.9)
         self.image_label.clicked.connect(self.update_coordinate_display)
@@ -625,6 +633,30 @@ class InteractiveMapWindow(QMainWindow):
         upload_button = QPushButton("Upload Image")
         upload_button.clicked.connect(self.upload_image)
         right_panel.addWidget(upload_button)
+
+        # Origin axis input fields
+        axis_inputs_layout = QHBoxLayout()
+
+        self.origin_axis_1_input = QLineEdit()
+        self.origin_axis_1_input.setPlaceholderText("Origin Axis 1")
+        axis_inputs_layout.addWidget(self.origin_axis_1_input)
+
+        self.origin_axis_2_input = QLineEdit()
+        self.origin_axis_2_input.setPlaceholderText("Origin Axis 2")
+        axis_inputs_layout.addWidget(self.origin_axis_2_input)
+
+        right_panel.addLayout(axis_inputs_layout)
+
+        # Update origin motor coordinate button
+        update_origin_button = QPushButton("Update Origin Motor Coordinate")
+        update_origin_button.clicked.connect(self.update_origin_motor_coordinates)
+        right_panel.addWidget(update_origin_button)
+
+        # Display updated origin motor coordinate
+        self.origin_motor_coordinate_display = QLabel("Origin Motor Coordinate: None")
+        self.origin_motor_coordinate_display.setAlignment(Qt.AlignLeft)
+        self.origin_motor_coordinate_display.setStyleSheet("font-size: 16px; font-weight: bold;")
+        right_panel.addWidget(self.origin_motor_coordinate_display)
 
         # Coordinate display
         self.coordinate_display = QLabel("Coordinates: None")
@@ -667,6 +699,18 @@ class InteractiveMapWindow(QMainWindow):
             self.motor_axis_1_display.setText("Motor Axis 1: None")
             self.motor_axis_2_display.setText("Motor Axis 2: None")
 
+    def update_origin_motor_coordinates(self):
+        """
+        Update the origin motor coordinates from the text fields.
+        """
+        try:
+            self.origin_axis_1 = float(self.origin_axis_1_input.text())
+            self.origin_axis_2 = float(self.origin_axis_2_input.text())
+            self.origin_motor_coordinate_display.setText(f"Origin Motor Coordinate: Axis 1: {self.origin_axis_1}, Axis2: {self.origin_axis_2}")
+        except ValueError:
+            self.show_message("Invalid input for origin coordinates.")
+
+
     def solve_motor_values(self):
         x, y = self.image_label.crosshair_pos.x(), self.image_label.crosshair_pos.y()
         v = np.array([x, y]) - self.origin   # image vector
@@ -680,9 +724,19 @@ class InteractiveMapWindow(QMainWindow):
         B = np.column_stack((image_axis_1_displacement, image_axis_2_displacement))
         B_inv = np.linalg.inv(B)
         c = B_inv @ u
-        motor_axis_1_value = c[0] * motor_axis_1_displacement
-        motor_axis_2_value = c[1] * motor_axis_2_displacement
+        motor_axis_1_displacement = c[0] * (-motor_axis_1_displacement)
+        motor_axis_2_displacement = c[1] * (-motor_axis_2_displacement)
+        motor_axis_1_value = self.origin_axis_1 + motor_axis_1_displacement
+        motor_axis_2_value = self.origin_axis_2 + motor_axis_2_displacement
         return motor_axis_1_value, motor_axis_2_value
+    
+    def show_message(self, message):
+        """
+        Display a message in a dialog box.
+        """
+        msg_box = QMessageBox(self)
+        msg_box.setText(message)
+        msg_box.exec_()
 
 
 # M @ u1 = v1; M @ u2 = v2, solve for M
