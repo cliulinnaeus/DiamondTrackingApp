@@ -263,17 +263,17 @@ class ImageTrackingApp(QMainWindow):
         # saved as (column, row)    
         # print(left_markers["axis 1"])
         # Extract corresponding points
-        u1 = np.array(left_markers["axis 1"]) - np.array(left_markers["origin"])
-        u2 = np.array(left_markers["axis 2"]) - np.array(left_markers["origin"])
+        v1 = np.array(left_markers["axis 1"]) - np.array(left_markers["origin"])
+        v2 = np.array(left_markers["axis 2"]) - np.array(left_markers["origin"])
 
-        v1 = np.array(right_markers["axis 1"]) - np.array(right_markers["origin"])
-        v2 = np.array(right_markers["axis 2"]) - np.array(right_markers["origin"])
+        u1 = np.array(right_markers["axis 1"]) - np.array(right_markers["origin"])
+        u2 = np.array(right_markers["axis 2"]) - np.array(right_markers["origin"])
 
         try:
             # saves origin
             self.origin = np.array(left_markers["origin"])
             # Solve transformation
-            self.transformation_matrix = solve_transformation(u1, u2, v1, v2)
+            self.transformation_matrix = solve_transformation(v1, v2, u1, u2)
             self.show_message(f"Transformation Matrix:\n{self.transformation_matrix}")
         except Exception as e:
             self.show_message(f"Error solving transformation: {e}")
