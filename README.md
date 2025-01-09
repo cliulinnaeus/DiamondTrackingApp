@@ -24,5 +24,6 @@ An application for interactive image tracking and motor axis displacement solvin
     ```bash
     python track.py
 
-
+### Tutorial
+See "Diamond Image Tracking Tutorial.pdf"
 
